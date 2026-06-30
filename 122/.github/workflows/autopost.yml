@@ -1,4 +1,4 @@
-﻿name: AI Forum Auto Post
+name: AI Forum Auto Post
 
 on:
   schedule:
@@ -20,6 +20,5 @@ jobs:
 
       - name: Run auto post script
         run: node auto_post.js
-        working-directory: 122
         env:
           NODE_ENV: production

@@ -1,4 +1,4 @@
-const https = require('https');
+﻿const https = require('https');
 const http = require('http');
 const fs = require('fs');
 
@@ -265,7 +265,7 @@ async function rewriteWithAI(article, boardPrompt, isGitHub) {
       if (parts.length >= 2) {
         const readmeUrl = 'https://raw.githubusercontent.com/' + parts[0] + '/' + parts[1] + '/main/README.md';
         const readmeHtml = await httpsGet(readmeUrl);
-        readmeContent = readmeHtml.replace(/[|^$`]/g, " ").replace(/s+/g, " ").trim().substring(0, 1500);
+        readmeContent = readmeHtml.replace(/[|^$`]/g, " ").replace(/\s+/g, " ").trim().substring(0, 1500);
       }
     } catch(e) {}
   }
@@ -285,7 +285,7 @@ async function rewriteWithAI(article, boardPrompt, isGitHub) {
     if (result.choices && result.choices[0]) { text = result.choices[0].message.content || result.choices[0].reasoning || ''; }
     else if (result.output) { text = result.output.text; }
     else { throw new Error('No content'); }
-    const jsonMatch = text.match(/{[sS]*"title"[sS]*"content"[sS]*}/);
+    const jsonMatch = text.match(/{[\s\S]*"title"[\s\S]*"content"[\s\S]*}/);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
     return { title: article.title, content: text };
   } catch(e) {
