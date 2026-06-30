@@ -1,0 +1,25 @@
+﻿name: AI Forum Auto Post
+
+on:
+  schedule:
+    # 每天早上 9:00 (北京时间) 运行
+    - cron: '0 1 * * *'
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  auto-post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run auto post script
+        run: node auto_post.js
+        working-directory: 122
+        env:
+          NODE_ENV: production
