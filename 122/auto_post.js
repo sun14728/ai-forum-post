@@ -315,10 +315,15 @@ async function main() {
 
   const postedTitles = new Set();
   try {
-    const logContent = fs.readFileSync(CONFIG.logFile, 'utf8');
-    const matches = logContent.matchAll(/OK! tid=\d+ "([^"]+)"/g);
-    for (const m of matches) postedTitles.add(m[1]);
-  } catch(e) {}
+    for (let f = 3; f <= 9; f++) {
+      const resp = await httpsGet(CONFIG.forum.url + '/api_threads.php?fid=' + f + '&limit=50');
+      const data = JSON.parse(resp);
+      if (data.code === 0 && data.threads) {
+        for (const t of data.threads) postedTitles.add(t.subject);
+      }
+    }
+    log('Posted titles loaded: ' + postedTitles.size);
+  } catch(e) { log('Dedup load failed: ' + e.message); }
   const newArticles = articles.filter(a => !postedTitles.has(a.title));
   log('New: ' + newArticles.length);
 

@@ -1,10 +1,9 @@
-name: AI Forum Auto Post
+﻿name: AI Forum Auto Post
 
 on:
   schedule:
-    # 每天早上 9:00 (北京时间) 运行
     - cron: '0 1 * * *'
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   auto-post:
@@ -12,13 +11,27 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
+      - name: Restore bot state
+        uses: actions/cache@v4
+        with:
+          path: bot_replied.json
+          key: ${{ 'bot-replied-' }}${{ github.run_id }}
+          restore-keys: ${{ 'bot-replied-' }}
       - name: Run auto post script
         run: node auto_post.js
         env:
           NODE_ENV: production
+      - name: Run auto reply script
+        run: node bot_reply.js
+        env:
+          NODE_ENV: production
+      - name: Save bot state
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: bot_replied.json
+          key: ${{ 'bot-replied-' }}${{ github.run_id }}
