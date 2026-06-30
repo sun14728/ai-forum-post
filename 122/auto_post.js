@@ -59,7 +59,7 @@ const BOARD_CONFIG = {
 };
 
 const SOURCES = [
-  { name: '36kr AI', url: 'https://36kr.com/information/AI/', baseUrl: 'https://36kr.com', parser: 'list', boards: [3, 4, 5] },
+  { name: '36kr AI', url: 'https://36kr.com/information/AI/', baseUrl: 'https://36kr.com', parser: 'list36kr', boards: [3, 4, 5] },
   { name: '机器之心', url: 'https://www.jiqizhixin.com/', baseUrl: 'https://www.jiqizhixin.com', parser: 'list', boards: [3, 4, 5, 6] },
   { name: '量子位', url: 'https://www.qbitai.com/', baseUrl: 'https://www.qbitai.com', parser: 'list', boards: [3, 4, 5, 6] },
   { name: '雷克 AI', url: 'https://www.leiphone.com/category/ai', baseUrl: 'https://www.leiphone.com', parser: 'list', boards: [3, 4, 5] },
@@ -71,7 +71,7 @@ const SOURCES = [
   { name: 'V2EX 程序员', url: 'https://www.v2ex.com/go/programmer', baseUrl: 'https://www.v2ex.com', parser: 'v2ex', boards: [5, 7] },
   { name: '掘金 AI', url: 'https://juejin.cn/tag/AI', baseUrl: 'https://juejin.cn', parser: 'list', boards: [4, 5, 7] },
   { name: 'InfoQ AI', url: 'https://www.infoq.cn/topic/AI', baseUrl: 'https://www.infoq.cn', parser: 'list', boards: [3, 5] },
-  { name: '少数派', url: 'https://sspai.com/tag/AI', baseUrl: 'https://sspai.com', parser: 'list', boards: [4, 6] },
+  { name: '少数派', url: 'https://sspai.com/feed', baseUrl: 'https://sspai.com', parser: 'rss', boards: [4, 6] },
   { name: 'LiblibAI', url: 'https://liblib.art/', baseUrl: 'https://liblib.art', parser: 'list', boards: [6, 4] },
   { name: 'GitHub Trending AI', url: 'https://github.com/trending?since=daily', baseUrl: 'https://github.com', parser: 'github_trending', boards: [9, 5, 8] },
   { name: 'GitHub Topic LLM', url: 'https://github.com/topics/llm?o=desc&s=stars', baseUrl: 'https://github.com', parser: 'github_topic', boards: [9, 5, 8] },
@@ -85,7 +85,7 @@ const SOURCES = [
 function httpsGet(url, headers) {
   return new Promise((resolve, reject) => {
     const mod = url.startsWith('https') ? https : http;
-    const req = mod.get(url, Object.assign({ 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 'Accept': 'text/html,application/xhtml+xml', 'Accept-Language': 'zh-CN,zh;q=0.9' }, headers || {}), (res) => {
+    const req = mod.get(url, { headers: Object.assign({ 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36', 'Accept': 'text/html,application/xhtml+xml', 'Accept-Language': 'zh-CN,zh;q=0.9' }, headers || {}) }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         const loc = res.headers.location.startsWith('/') ? new URL(url).origin + res.headers.location : res.headers.location;
         return httpsGet(loc, headers).then(resolve).catch(reject);
@@ -135,20 +135,27 @@ function sanitizeContent(text) {
 function parseList(html, baseUrl) {
   const results = [];
   const seen = new Set();
-  const re1 = new RegExp('<a[^>]*href="([^"]+)" title="([\u4e00-\u9fffA-Za-z0-9 _-\u3001\uFF08\uFF09]{8,80})"<^>]*>[^<]*</a>', 'gi');
-  const re2 = new RegExp('<h[23][^>]*>.*?<a[^>]*href="(/[^"]+)"[^>]*>([^<]{10,120})</a>', 'gi');
+  const re1 = new RegExp('<a[^>]*href="([^"]+)"[^>]*title="([^"]{8,80})"[^>]*>[^<]*</a>', 'gi');
+  const re2 = new RegExp('<h[23][^>]*>[\\s\\S]*?<a[^>]*href="(/[^"]+)"[^>]*>([^<]{10,120})</a>', 'gi');
+  const re3 = new RegExp('<a[^>]*href="(https?://[^"]+)"[^>]*>([\u4e00-\u9fffA-Za-z0-9 \u3001\uff08\uff09]{8,80})</a>', 'gi');
   let m;
   while ((m = re1.exec(html)) !== null) {
-    const title = m[2].replace(/\s+/g, " ").trim();
+    const title = m[2].replace(/\\s+/g, " ").trim();
     let link = m[1];
     if (link.startsWith("/")) link = baseUrl + link;
     if (!link.startsWith("http") || title.length < 8 || seen.has(title)) continue;
     seen.add(title); results.push({ title, link });
   }
   while ((m = re2.exec(html)) !== null) {
-    const title = m[2].replace(/\s+/g, " ").trim();
+    const title = m[2].replace(/\\s+/g, " ").trim();
     let link = baseUrl + m[1];
     if (!link.startsWith("http") || title.length < 8 || seen.has(title)) continue;
+    seen.add(title); results.push({ title, link });
+  }
+  while ((m = re3.exec(html)) !== null) {
+    const title = m[2].replace(/\\s+/g, " ").trim();
+    const link = m[1];
+    if (title.length < 8 || seen.has(title)) continue;
     seen.add(title); results.push({ title, link });
   }
   return results;
@@ -209,6 +216,48 @@ function parseHFPapers(html) {
   }
   return results;
 }
+function parse36krState(html) {
+  const results = [];
+  const seen = new Set();
+  const startMarker = 'window.initialState=';
+  const startIdx = html.indexOf(startMarker);
+  if (startIdx < 0) return results;
+  const jsonStart = startIdx + startMarker.length;
+  let depth = 0, endIdx = jsonStart;
+  for (let i = jsonStart; i < html.length && i < jsonStart + 100000; i++) {
+    if (html[i] === '{') depth++;
+    if (html[i] === '}') depth--;
+    if (depth === 0) { endIdx = i + 1; break; }
+  }
+  try {
+    const state = JSON.parse(html.substring(jsonStart, endIdx));
+    const itemList = state && state.information && state.information.informationList && state.information.informationList.itemList;
+    if (!itemList || !Array.isArray(itemList)) return results;
+    for (const item of itemList) {
+      const title = (item.templateMaterial && item.templateMaterial.widgetTitle) || item.widgetTitle || '';
+      const itemId = item.itemId || '';
+      if (title.length < 5 || seen.has(title)) continue;
+      seen.add(title);
+      results.push({ title, link: 'https://36kr.com/p/' + itemId });
+    }
+  } catch(e) {}
+  return results;
+}
+
+function parseRSS(xml) {
+  const results = [];
+  const seen = new Set();
+  const re = /<item>[\s\S]*?<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>[\s\S]*?<link>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/link>/gi;
+  let m;
+  while ((m = re.exec(xml)) !== null) {
+    const title = m[1].replace(/<!\[CDATA\[|\]\]>/g, '').replace(/\s+/g, ' ').trim();
+    const link = m[2].replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+    if (title.length < 5 || seen.has(title)) continue;
+    seen.add(title);
+    results.push({ title, link });
+  }
+  return results;
+}
 
 function scoreForBoard(title, keywords) {
   const t = title.toLowerCase();
@@ -241,6 +290,8 @@ async function fetchArticles() {
         case 'github_trending': articles = parseGitHubTrending(html); break;
         case 'github_topic': articles = parseGitHubTopic(html); break;
         case 'hf_papers': articles = parseHFPapers(html); break;
+        case 'list36kr': articles = parse36krState(html); break;
+        case 'rss': articles = parseRSS(html); break;
         default: articles = parseList(html, src.baseUrl);
       }
       for (const art of articles) {
