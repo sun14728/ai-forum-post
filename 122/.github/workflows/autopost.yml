@@ -3,6 +3,7 @@
 on:
   schedule:
     - cron: '0 1 * * *'
+    - cron: '0 9 * * *'
   workflow_dispatch:
 
 jobs:
@@ -19,8 +20,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: bot_replied.json
-          key: ${{ 'bot-replied-' }}${{ github.run_id }}
-          restore-keys: ${{ 'bot-replied-' }}
+          key: bot-replied-${{ github.run_id }}
+          restore-keys: bot-replied-
       - name: Run auto post script
         run: node auto_post.js
         env:
@@ -34,4 +35,4 @@ jobs:
         if: always()
         with:
           path: bot_replied.json
-          key: ${{ 'bot-replied-' }}${{ github.run_id }}
+          key: bot-replied-${{ github.run_id }}
