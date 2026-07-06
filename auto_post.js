@@ -2,6 +2,8 @@ const https = require('https');
 const http = require('http');
 const fs = require('fs');
 const TARGET_FIDS = (process.env.TARGET_FIDS || '3,4,5,6,7,8,9').split(',').map(x => Number(x.trim())).filter(Boolean);
+const MIN_BOARD_SCORE = { 6: 4, 7: 4, 8: 4, 9: 0 };
+
 
 
 const CONFIG = {
@@ -271,10 +273,12 @@ function scoreForBoard(article, fid) {
   for (const k of bc.keywords) {
     if (t.includes(k.toLowerCase())) score += 2;
   }
-  if (fid === 6 && /(diffusion|comfyui|lora|video|image|pika|runway|sora|flux|mj|midjourney|可灵|即梦|生图|生视频|视频|绘图|角色|分镜)/i.test(t)) score += 6;
-  if (fid === 7 && /(developer|workflow|coding|vibe|开发|问题|讨论|经验|趋势|选择|对比)/i.test(t)) score += 5;
-  if (fid === 8 && /(free|open source|huggingface|ollama|resource|dataset|paper|免费|开源|资源|算力|额度|白嫖)/i.test(t)) score += 5;
+  if (fid === 6 && /(diffusion|stable.?diffusion|comfyui|lora|video|image|pika|runway|sora|flux|mj|midjourney|可灵|即梦|生图|生视频|文生图|文生视频|图生视频|视频生成|绘图|角色|分镜|漫剧|短剧|ai画|ai绘)/i.test(t)) score += 6;
+  if (fid === 7 && /(developer|workflow|coding|vibe|prompt|api|agent|开发者|开发|编程|代码|问题|讨论|经验|趋势|选择|对比|踩坑|架构|部署)/i.test(t)) score += 5;
+  if (fid === 8 && /(free|open source|huggingface|ollama|resource|dataset|paper|model|api|免费|开源|资源|算力|额度|白嫖|模型|教程|指南|论文|数据集)/i.test(t)) score += 5;
+  if (fid === 7 && /^[a-z0-9\s:,'\-]+$/i.test(article.title) && !/(ai|llm|gpt|api|agent|code|developer|github|model|prompt|workflow)/i.test(article.title)) score -= 6;
   if (fid === 9 && article.isGitHub) score += 8;
+
   return score;
 }
 
@@ -285,8 +289,10 @@ function buildBoardQueues(articles) {
     for (const src of SOURCES) {
       if (art.link.startsWith(src.baseUrl)) {
         for (const fid of src.boards) {
-          if (boardQueues[fid]) boardQueues[fid].push(Object.assign({}, art, { boardScore: scoreForBoard(art, fid) }));
+          const score = scoreForBoard(art, fid);
+          if (boardQueues[fid] && score >= (MIN_BOARD_SCORE[fid] || 0)) boardQueues[fid].push(Object.assign({}, art, { boardScore: score }));
         }
+
         break;
       }
     }
