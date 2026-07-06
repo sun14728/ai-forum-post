@@ -1,6 +1,8 @@
 const https = require('https');
 const http = require('http');
 const fs = require('fs');
+const TARGET_FIDS = (process.env.TARGET_FIDS || '3,4,5,6,7,8,9').split(',').map(x => Number(x.trim())).filter(Boolean);
+
 
 const CONFIG = {
   forum: { url: 'http://vps6.ccwu.cc', apiKey: 'aiforum_auto_post_2026' },
@@ -258,29 +260,47 @@ function parseRSS(xml) {
   return results;
 }
 
-function scoreForBoard(title, keywords) {
-  const t = title.toLowerCase();
-  let s = 0;
-  for (const k of keywords) { if (t.includes(k.toLowerCase())) s++; }
-  return s;
+function normalizeTitle(title) {
+  return String(title || '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
-function findBoards(article, boards) {
-  let best = boards[0];
-  let bestScore = -1;
-  for (const fid of boards) {
-    const bc = BOARD_CONFIG[fid];
-    if (!bc) continue;
-    const sc = scoreForBoard(article.title, bc.keywords);
-    if (sc > bestScore) { bestScore = sc; best = fid; }
+function scoreForBoard(article, fid) {
+  const bc = BOARD_CONFIG[fid];
+  const t = (article.title + ' ' + (article.link || '')).toLowerCase();
+  let score = 0;
+  for (const k of bc.keywords) {
+    if (t.includes(k.toLowerCase())) score += 2;
   }
-  return bestScore > 0 ? best : boards[0];
+  if (fid === 6 && /(diffusion|comfyui|lora|video|image|pika|runway|sora|flux|mj|midjourney|可灵|即梦|生图|生视频|视频|绘图|角色|分镜)/i.test(t)) score += 6;
+  if (fid === 7 && /(developer|workflow|coding|vibe|开发|问题|讨论|经验|趋势|选择|对比)/i.test(t)) score += 5;
+  if (fid === 8 && /(free|open source|huggingface|ollama|resource|dataset|paper|免费|开源|资源|算力|额度|白嫖)/i.test(t)) score += 5;
+  if (fid === 9 && article.isGitHub) score += 8;
+  return score;
+}
+
+function buildBoardQueues(articles) {
+  const boardQueues = {};
+  for (let i = 3; i <= 9; i++) boardQueues[i] = [];
+  for (const art of articles) {
+    for (const src of SOURCES) {
+      if (art.link.startsWith(src.baseUrl)) {
+        for (const fid of src.boards) {
+          if (boardQueues[fid]) boardQueues[fid].push(Object.assign({}, art, { boardScore: scoreForBoard(art, fid) }));
+        }
+        break;
+      }
+    }
+  }
+  for (const fid of Object.keys(boardQueues)) boardQueues[fid].sort((a, b) => b.boardScore - a.boardScore);
+  return boardQueues;
 }
 
 async function fetchArticles() {
   const allArticles = [];
   const seen = new Set();
   for (const src of SOURCES) {
+    if (!src.boards.some(fid => TARGET_FIDS.includes(fid))) continue;
+
     try {
       const html = await httpsGet(src.url);
       let articles = [];
@@ -296,8 +316,10 @@ async function fetchArticles() {
       for (const art of articles) {
         if (seen.has(art.title)) continue;
         seen.add(art.title);
-        allArticles.push(art);
+        allArticles.push(Object.assign({}, art, { isGitHub: art.link.includes('github.com/') }));
       }
+
+
       log('Fetch: ' + src.name + ' (' + articles.length + ')');
     } catch(e) {
       log('Fetch failed: ' + src.name + ' - ' + e.message);
@@ -366,50 +388,45 @@ async function main() {
   const postedTitles = new Set();
   try {
     for (let f = 3; f <= 9; f++) {
-      const resp = await httpsGet(CONFIG.forum.url + '/api_threads.php?fid=' + f + '&limit=50');
+      const resp = await httpsGet(CONFIG.forum.url + '/api_threads.php?fid=' + f + '&limit=100');
       const data = JSON.parse(resp);
       if (data.code === 0 && data.threads) {
-        for (const t of data.threads) postedTitles.add(t.subject);
+        for (const t of data.threads) postedTitles.add(normalizeTitle(t.subject));
       }
     }
     log('Posted titles loaded: ' + postedTitles.size);
   } catch(e) { log('Dedup load failed: ' + e.message); }
-  const newArticles = articles.filter(a => !postedTitles.has(a.title));
+  const newArticles = articles.filter(a => !postedTitles.has(normalizeTitle(a.title)));
   log('New: ' + newArticles.length);
 
-  const boardQueues = {};
-  for (let i = 3; i <= 9; i++) boardQueues[i] = [];
-
-  for (const art of newArticles) {
-    for (const src of SOURCES) {
-      if (art.link.startsWith(src.baseUrl)) {
-        const fid = findBoards(art, src.boards);
-        if (boardQueues[fid] && !boardQueues[fid].includes(art)) boardQueues[fid].push(art);
-        break;
-      }
-    }
-  }
+  const boardQueues = buildBoardQueues(newArticles);
+  const usedArticleKeys = new Set();
 
   let totalOk = 0;
-  for (let fid = 3; fid <= 9; fid++) {
+  for (const fid of TARGET_FIDS) {
     const bc = BOARD_CONFIG[fid];
     if (!bc || bc.maxPosts <= 0) continue;
-    const queue = boardQueues[fid];
+    const queue = boardQueues[fid] || [];
     log('F' + fid + ' ' + bc.name + ': ' + queue.length + ' queued');
+
 
     let posted = 0;
     for (const art of queue) {
       if (posted >= bc.maxPosts) break;
-      log('  ' + art.title);
+      const key = normalizeTitle(art.title);
+      if (usedArticleKeys.has(key)) continue;
+      log('  ' + art.title + ' [score=' + art.boardScore + ']');
       const rewritten = await rewriteWithAI(art, bc.prompt, fid === 9);
+
       if (!rewritten) { log('    AI failed'); continue; }
       if (rewritten.content.length < 200) { log('    too short'); continue; }
       await sleep(CONFIG.postDelayMs);
       const result = await postToForum(rewritten.title, sanitizeContent(rewritten.content), fid);
       if (result && result.code === 0) {
         log('    OK! tid=' + result.tid + ' "' + rewritten.title + '"');
+        usedArticleKeys.add(key);
         posted++; totalOk++;
-      } else {
+
         log('    failed: ' + JSON.stringify(result));
       }
     }
