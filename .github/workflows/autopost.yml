@@ -1,10 +1,15 @@
-﻿name: AI Forum Auto Post
+name: AI Forum Auto Post
 
 on:
   schedule:
     - cron: '0 1 * * *'
     - cron: '0 9 * * *'
   workflow_dispatch:
+    inputs:
+      target_fids:
+        description: '要发帖的板块 fid，逗号分隔；留空表示 3,4,5,6,7,8,9'
+        required: false
+        default: '3,4,5,6,7,8,9'
 
 jobs:
   auto-post:
@@ -26,6 +31,8 @@ jobs:
         run: node auto_post.js
         env:
           NODE_ENV: production
+          TARGET_FIDS: ${{ github.event.inputs.target_fids || '3,4,5,6,7,8,9' }}
+
       - name: Run auto reply script
         run: node bot_reply.js
         env:
